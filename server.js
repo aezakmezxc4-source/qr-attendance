@@ -117,7 +117,7 @@ app.post("/api/attendance", async (req, res) => {
     // Find the registered student.
     const studentResponse = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: "Students!A2:B"
+      range: "'Students'!A2:B1000"
     });
 
     const students = studentResponse.data.values || [];
