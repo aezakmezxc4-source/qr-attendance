@@ -83,6 +83,7 @@ function checkConfiguration() {
 // Attendance endpoint
 app.post("/api/attendance", async (req, res) => {
   try {
+    console.log("Attendance endpoint reached");
     const lrn = String(req.body.lrn || "").trim();
 
     // Basic LRN validation
