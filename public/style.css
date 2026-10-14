@@ -131,25 +131,29 @@ button:disabled {
   }
 
   
+
+.school-logo {
+  display: block;
+  width: 65px;
+  height: 65px;
+  object-fit: cover;
+  border-radius: 50%;
+  border: 2px solid #e5e7eb;
+  margin: 0 auto;
+}
+
 .school-header {
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
-  gap: 10px;
-  margin-bottom: 24px;
-}
-
-.school-logo {
-  width: 100px;
-  height: 100px;
-  object-fit: contain;
+  gap: 8px;
+  margin-bottom: 20px;
 }
 
 .school-name {
-  font-size: 20px;
+  font-size: 17px;
   font-weight: 800;
   line-height: 1.4;
   margin: 0;
-}
-}
+}}
