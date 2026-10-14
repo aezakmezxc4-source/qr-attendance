@@ -76,7 +76,7 @@ const drive = google.drive({
   auth
 });
 
-// Get the current date and time in the Philippines.
+// Get the current Philippine date and time.
 function getPhilippineDateTime() {
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: "Asia/Manila",
@@ -101,10 +101,11 @@ function getPhilippineDateTime() {
   };
 }
 
-// Find today's spreadsheet or create it if it doesn't exist.
+// Find today's spreadsheet or create it inside the Drive folder.
 async function getDailyAttendanceSpreadsheet(date) {
   const fileName = `Attendance - ${date}`;
 
+  // Look for an existing spreadsheet for today's date.
   const search = await drive.files.list({
     q:
       `'${FOLDER_ID}' in parents and ` +
@@ -123,66 +124,65 @@ async function getDailyAttendanceSpreadsheet(date) {
     return existingFiles[0].id;
   }
 
-  // Create a spreadsheet with an Attendance tab.
-  const created = await sheets.spreadsheets.create({
+  // Create the spreadsheet directly inside the folder.
+  const created = await drive.files.create({
     requestBody: {
-      properties: {
-        title: fileName
-      },
-      sheets: [
+      name: fileName,
+      mimeType: "application/vnd.google-apps.spreadsheet",
+      parents: [FOLDER_ID]
+    },
+    fields: "id,name,parents",
+    supportsAllDrives: true
+  });
+
+  const newSpreadsheetId = created.data.id;
+
+  // Get the default worksheet.
+  const spreadsheet = await sheets.spreadsheets.get({
+    spreadsheetId: newSpreadsheetId
+  });
+
+  const firstSheet = spreadsheet.data.sheets?.[0];
+
+  if (!firstSheet) {
+    throw new Error("The new spreadsheet has no worksheet.");
+  }
+
+  // Rename the worksheet to Attendance.
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: newSpreadsheetId,
+    requestBody: {
+      requests: [
         {
-          properties: {
-            title: "Attendance"
+          updateSheetProperties: {
+            properties: {
+              sheetId: firstSheet.properties.sheetId,
+              title: "Attendance"
+            },
+            fields: "title"
           }
         }
       ]
     }
   });
 
-  const newSpreadsheetId = created.data.spreadsheetId;
+  // Add the column headings.
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: newSpreadsheetId,
+    range: "'Attendance'!A1:C1",
+    valueInputOption: "RAW",
+    requestBody: {
+      values: [[
+        "Timestamp",
+        "LRN",
+        "Student Name"
+      ]]
+    }
+  });
 
-  try {
-    // Move the new spreadsheet into the designated Drive folder.
-    const file = await drive.files.get({
-      fileId: newSpreadsheetId,
-      fields: "parents"
-    });
+  console.log(`Created daily spreadsheet: ${fileName}`);
 
-    const previousParents = file.data.parents || [];
-
-    await drive.files.update({
-      fileId: newSpreadsheetId,
-      addParents: FOLDER_ID,
-      ...(previousParents.length
-        ? { removeParents: previousParents.join(",") }
-        : {}),
-      fields: "id,parents"
-    });
-
-    // Add the column headings.
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: newSpreadsheetId,
-      range: "'Attendance'!A1:C1",
-      valueInputOption: "RAW",
-      requestBody: {
-        values: [[
-          "Timestamp",
-          "LRN",
-          "Student Name"
-        ]]
-      }
-    });
-
-    console.log(`Created daily spreadsheet: ${fileName}`);
-
-    return newSpreadsheetId;
-  } catch (error) {
-    console.error(
-      "Daily spreadsheet setup failed:",
-      error.message
-    );
-    throw error;
-  }
+  return newSpreadsheetId;
 }
 
 // Health check.
@@ -190,11 +190,12 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok" });
 });
 
-// Verify the student and record attendance in the daily spreadsheet.
+// Verify the student and record attendance.
 app.post("/api/attendance", async (req, res) => {
   try {
     const lrn = String(req.body?.lrn || "").trim();
 
+    // Validate the LRN.
     if (!/^\d{1,20}$/.test(lrn)) {
       return res.status(400).json({
         success: false,
@@ -202,7 +203,7 @@ app.post("/api/attendance", async (req, res) => {
       });
     }
 
-    // Check the permanent student list.
+    // Read the permanent student list.
     const studentResponse =
       await sheets.spreadsheets.values.get({
         spreadsheetId: SPREADSHEET_ID,
@@ -211,6 +212,7 @@ app.post("/api/attendance", async (req, res) => {
 
     const students = studentResponse.data.values || [];
 
+    // Compare LRNs as strings to preserve leading zeros.
     const student = students.find(row =>
       String(row[0] ?? "").trim() === lrn
     );
@@ -232,14 +234,14 @@ app.post("/api/attendance", async (req, res) => {
       });
     }
 
-    // Determine today's Philippine date.
+    // Get the Philippine date and timestamp.
     const { date, timestamp } = getPhilippineDateTime();
 
-    // Find today's file or create it.
+    // Find or create today's attendance spreadsheet.
     const dailySpreadsheetId =
       await getDailyAttendanceSpreadsheet(date);
 
-    // Save the attendance record.
+    // Record attendance in today's spreadsheet.
     await sheets.spreadsheets.values.append({
       spreadsheetId: dailySpreadsheetId,
       range: "'Attendance'!A:C",
@@ -261,7 +263,8 @@ app.post("/api/attendance", async (req, res) => {
     console.error("Attendance operation failed:", {
       message: error.message,
       code: error.code || null,
-      status: error.response?.status || null
+      status: error.response?.status || null,
+      details: error.response?.data?.error?.errors || null
     });
 
     return res.status(500).json({
