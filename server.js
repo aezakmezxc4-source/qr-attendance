@@ -3,16 +3,34 @@ require("dotenv").config();
 const express = require("express");
 const { google } = require("googleapis");
 const path = require("path");
+
 const crypto = require("crypto");
 
-const testKey = process.env.GOOGLE_PRIVATE_KEY
-  ?.replace(/\\n/g, "\n");
+let testKey = process.env.GOOGLE_PRIVATE_KEY || "";
+
+// Handle surrounding quotes and escaped newlines
+testKey = testKey.trim();
+
+if (
+  (testKey.startsWith('"') && testKey.endsWith('"')) ||
+  (testKey.startsWith("'") && testKey.endsWith("'"))
+) {
+  testKey = testKey.slice(1, -1);
+}
+
+testKey = testKey.replace(/\\n/g, "\n");
 
 try {
   crypto.createPrivateKey(testKey);
   console.log("Google private key format: OK");
 } catch (error) {
   console.error("Private key format check failed:", error.message);
+  console.error("Key diagnostic:", {
+    present: Boolean(testKey),
+    startsCorrectly: testKey.startsWith("-----BEGIN PRIVATE KEY-----"),
+    endsCorrectly: testKey.trimEnd().endsWith("-----END PRIVATE KEY-----"),
+    containsEscapedNewlines: testKey.includes("\\n")
+  });
 }
 
 const app = express();
@@ -26,7 +44,9 @@ app.use(express.static(path.join(__dirname, "public")));
 const auth = new google.auth.GoogleAuth({
   credentials: {
     client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-    private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n")
+    private_key: process.env.GOOGLE_PRIVATE_KEY
+  ?.trim()
+  .replace(/\\n/g, "\n")
   },
   scopes: [
     "https://www.googleapis.com/auth/spreadsheets"
