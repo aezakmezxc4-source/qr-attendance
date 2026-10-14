@@ -3,6 +3,17 @@ require("dotenv").config();
 const express = require("express");
 const { google } = require("googleapis");
 const path = require("path");
+const crypto = require("crypto");
+
+const testKey = process.env.GOOGLE_PRIVATE_KEY
+  ?.replace(/\\n/g, "\n");
+
+try {
+  crypto.createPrivateKey(testKey);
+  console.log("Google private key format: OK");
+} catch (error) {
+  console.error("Private key format check failed:", error.message);
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
