@@ -1,3 +1,4 @@
+
 * {
   box-sizing: border-box;
 }
@@ -23,6 +24,40 @@ body {
   box-shadow: 0 10px 35px rgba(15, 23, 42, 0.09);
 }
 
+/* School logo and name */
+.school-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.attendance-card .school-header img.school-logo {
+  display: block;
+  width: 45px !important;
+  height: 45px !important;
+  min-width: 45px;
+  max-width: 45px !important;
+  min-height: 45px;
+  max-height: 45px !important;
+  object-fit: contain;
+  border-radius: 50%;
+  border: 2px solid #e5e7eb;
+  margin: 0 auto;
+}
+
+.school-name {
+  display: block;
+  margin: 0;
+  font-size: 17px;
+  font-weight: 800;
+  line-height: 1.4;
+  text-align: center;
+}
+
+/* QR label */
 .logo {
   width: 58px;
   height: 58px;
@@ -130,30 +165,7 @@ button:disabled {
     font-size: 23px;
   }
 
-  
-
-.school-logo {
-  display: block;
-  width: 65px;
-  height: 65px;
-  object-fit: cover;
-  border-radius: 50%;
-  border: 2px solid #e5e7eb;
-  margin: 0 auto;
+  .school-name {
+    font-size: 16px;
+  }
 }
-
-.school-header {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  gap: 8px;
-  margin-bottom: 20px;
-}
-
-.school-name {
-  font-size: 17px;
-  font-weight: 800;
-  line-height: 1.4;
-  margin: 0;
-}}
