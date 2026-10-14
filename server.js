@@ -1,4 +1,5 @@
 require("dotenv").config();
+console.log("DIAGNOSTIC VERSION 2 RUNNING");
 
 const express = require("express");
 const { google } = require("googleapis");
@@ -25,7 +26,8 @@ try {
   console.log("Google private key format: OK");
 } catch (error) {
   console.error("Private key format check failed:", error.message);
-  console.error("Key diagnostic:", {
+
+  console.error("KEY DIAGNOSTIC:", {
     present: Boolean(testKey),
     startsCorrectly: testKey.startsWith("-----BEGIN PRIVATE KEY-----"),
     endsCorrectly: testKey.trimEnd().endsWith("-----END PRIVATE KEY-----"),
