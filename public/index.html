@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <title>QR Attendance System</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/script.js" defer></script>
+</head>
+<body>
+  <main class="attendance-card">
+    <div class="logo">QR</div>
+
+    <h1>Student Attendance</h1>
+    <p class="subtitle">
+      Enter your Learner Reference Number (LRN)
+      to record your attendance.
+    </p>
+
+    <form id="attendanceForm">
+      <label for="lrn">Student LRN</label>
+
+      <input
+        type="text"
+        id="lrn"
+        name="lrn"
+        placeholder="Enter your LRN"
+        inputmode="numeric"
+        autocomplete="off"
+        maxlength="20"
+        pattern="[0-9]{1,20}"
+        required
+      >
+
+      <button type="submit" id="submitButton">
+        Record Attendance
+      </button>
+    </form>
+
+    <div id="result" class="result" role="status"
+         aria-live="polite" hidden>
+    </div>
+
+    <p class="privacy-note">
+      Your LRN is checked against the registered student list.
+    </p>
+  </main>
+</body>
+</html>
