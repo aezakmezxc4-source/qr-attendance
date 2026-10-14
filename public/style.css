@@ -129,4 +129,27 @@ button:disabled {
   h1 {
     font-size: 23px;
   }
+
+  
+.school-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 10px;
+  margin-bottom: 24px;
+}
+
+.school-logo {
+  width: 100px;
+  height: 100px;
+  object-fit: contain;
+}
+
+.school-name {
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.4;
+  margin: 0;
+}
 }
