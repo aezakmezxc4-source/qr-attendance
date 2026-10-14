@@ -4,7 +4,6 @@ require("dotenv").config();
 const express = require("express");
 const { google } = require("googleapis");
 const path = require("path");
-const crypto = require("crypto");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -13,11 +12,10 @@ app.disable("x-powered-by");
 app.use(express.json({ limit: "10kb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
-// Normalize the private key from the environment variable.
+// Normalize the private key from Render environment variables.
 function normalizePrivateKey(value) {
   let key = String(value || "").trim();
 
-  // Remove surrounding quotes if accidentally included.
   if (
     (key.startsWith('"') && key.endsWith('"')) ||
     (key.startsWith("'") && key.endsWith("'"))
@@ -25,7 +23,6 @@ function normalizePrivateKey(value) {
     key = key.slice(1, -1);
   }
 
-  // Convert literal \n sequences into actual newlines.
   return key.replace(/\\n/g, "\n");
 }
 
@@ -33,7 +30,9 @@ const privateKey = normalizePrivateKey(
   process.env.GOOGLE_PRIVATE_KEY
 );
 
-// Check required environment variables.
+const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID;
+
+// Verify environment variables.
 function checkConfiguration() {
   const required = [
     "GOOGLE_SHEET_ID",
@@ -50,20 +49,11 @@ function checkConfiguration() {
       `Missing environment variables: ${missing.join(", ")}`
     );
   }
-
-  // Validate the key without printing the secret.
-  try {
-    crypto.createPrivateKey(privateKey);
-    console.log("Google private key format: OK");
-  } catch (error) {
-    throw new Error(
-      "Google private key is invalid or incorrectly formatted. " +
-      "Check GOOGLE_PRIVATE_KEY in Render Environment settings."
-    );
-  }
 }
 
-// Google Sheets authentication.
+// Authenticate with Google Sheets.
+checkConfiguration();
+
 const auth = new google.auth.GoogleAuth({
   credentials: {
     client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
@@ -79,9 +69,7 @@ const sheets = google.sheets({
   auth
 });
 
-const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID;
-
-// Philippine local timestamp.
+// Philippine date and time.
 function getPhilippineTimestamp() {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Manila",
@@ -102,11 +90,17 @@ function getPhilippineTimestamp() {
     `${values.hour}:${values.minute}:${values.second}`;
 }
 
-// Attendance endpoint.
+// Check that the server is running.
+app.get("/api/health", (req, res) => {
+  res.json({ status: "ok" });
+});
+
+// Record attendance after verifying the student's LRN.
 app.post("/api/attendance", async (req, res) => {
   try {
     const lrn = String(req.body?.lrn || "").trim();
 
+    // Reject empty or non-numeric LRNs.
     if (!/^\d{1,20}$/.test(lrn)) {
       return res.status(400).json({
         success: false,
@@ -114,18 +108,20 @@ app.post("/api/attendance", async (req, res) => {
       });
     }
 
-    // Find the registered student.
+    // Read the registered student list.
     const studentResponse = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: "'Students'!A2:B1000"
+      range: "'Students'!A2:B"
     });
 
     const students = studentResponse.data.values || [];
 
+    // Compare LRNs as strings to preserve leading zeros.
     const student = students.find(row =>
       String(row[0] ?? "").trim() === lrn
     );
 
+    // Do not record unregistered students.
     if (!student) {
       return res.status(404).json({
         success: false,
@@ -138,16 +134,17 @@ app.post("/api/attendance", async (req, res) => {
     if (!studentName) {
       return res.status(400).json({
         success: false,
-        message: "Your student record is incomplete. Contact your teacher."
+        message: "The student record has no name. Please contact your teacher."
       });
     }
 
+    // Generate the timestamp after verifying the student.
     const timestamp = getPhilippineTimestamp();
 
-    // Record attendance in Google Sheets.
+    // Save timestamp, LRN, and student name.
     await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
-      range: "Attendance!A:C",
+      range: "'Attendance'!A:C",
       valueInputOption: "RAW",
       insertDataOption: "INSERT_ROWS",
       requestBody: {
@@ -163,15 +160,11 @@ app.post("/api/attendance", async (req, res) => {
     });
 
   } catch (error) {
-    // Log useful error details without printing credentials.
-    console.error(
-      "Attendance operation failed:",
-      error.message,
-      "Code:",
-      error.code || "N/A",
-      "HTTP status:",
-      error.response?.status || "N/A"
-    );
+    console.error("Attendance operation failed:", {
+      message: error.message,
+      code: error.code || null,
+      status: error.response?.status || null
+    });
 
     return res.status(500).json({
       success: false,
@@ -180,19 +173,6 @@ app.post("/api/attendance", async (req, res) => {
   }
 });
 
-// Health check.
-app.get("/api/health", (req, res) => {
-  res.json({ status: "ok" });
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`QR Attendance server running on port ${PORT}`);
 });
-
-// Start the server only when configuration is valid.
-try {
-  checkConfiguration();
-
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`QR Attendance server running on port ${PORT}`);
-  });
-} catch (error) {
-  console.error("Startup error:", error.message);
-  process.exit(1);
-}
