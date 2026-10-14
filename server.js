@@ -1,39 +1,10 @@
+
 require("dotenv").config();
-console.log("DIAGNOSTIC VERSION 2 RUNNING");
 
 const express = require("express");
 const { google } = require("googleapis");
 const path = require("path");
-
 const crypto = require("crypto");
-
-let testKey = process.env.GOOGLE_PRIVATE_KEY || "";
-
-// Handle surrounding quotes and escaped newlines
-testKey = testKey.trim();
-
-if (
-  (testKey.startsWith('"') && testKey.endsWith('"')) ||
-  (testKey.startsWith("'") && testKey.endsWith("'"))
-) {
-  testKey = testKey.slice(1, -1);
-}
-
-testKey = testKey.replace(/\\n/g, "\n");
-
-try {
-  crypto.createPrivateKey(testKey);
-  console.log("Google private key format: OK");
-} catch (error) {
-  console.error("Private key format check failed:", error.message);
-
-  console.error("KEY DIAGNOSTIC:", {
-    present: Boolean(testKey),
-    startsCorrectly: testKey.startsWith("-----BEGIN PRIVATE KEY-----"),
-    endsCorrectly: testKey.trimEnd().endsWith("-----END PRIVATE KEY-----"),
-    containsEscapedNewlines: testKey.includes("\\n")
-  });
-}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -42,46 +13,27 @@ app.disable("x-powered-by");
 app.use(express.json({ limit: "10kb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
-// Google Sheets authentication
-const auth = new google.auth.GoogleAuth({
-  credentials: {
-    client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-    private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n")
-  },
-  scopes: [
-    "https://www.googleapis.com/auth/spreadsheets"
-  ]
-});
+// Normalize the private key from the environment variable.
+function normalizePrivateKey(value) {
+  let key = String(value || "").trim();
 
-const sheets = google.sheets({
-  version: "v4",
-  auth
-});
+  // Remove surrounding quotes if accidentally included.
+  if (
+    (key.startsWith('"') && key.endsWith('"')) ||
+    (key.startsWith("'") && key.endsWith("'"))
+  ) {
+    key = key.slice(1, -1);
+  }
 
-const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID;
-
-// Philippine local timestamp
-function getPhilippineTimestamp() {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Manila",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23"
-  }).formatToParts(new Date());
-
-  const value = Object.fromEntries(
-    parts.map(part => [part.type, part.value])
-  );
-
-  return `${value.year}-${value.month}-${value.day} ` +
-         `${value.hour}:${value.minute}:${value.second}`;
+  // Convert literal \n sequences into actual newlines.
+  return key.replace(/\\n/g, "\n");
 }
 
-// Check server configuration
+const privateKey = normalizePrivateKey(
+  process.env.GOOGLE_PRIVATE_KEY
+);
+
+// Check required environment variables.
 function checkConfiguration() {
   const required = [
     "GOOGLE_SHEET_ID",
@@ -98,15 +50,63 @@ function checkConfiguration() {
       `Missing environment variables: ${missing.join(", ")}`
     );
   }
+
+  // Validate the key without printing the secret.
+  try {
+    crypto.createPrivateKey(privateKey);
+    console.log("Google private key format: OK");
+  } catch (error) {
+    throw new Error(
+      "Google private key is invalid or incorrectly formatted. " +
+      "Check GOOGLE_PRIVATE_KEY in Render Environment settings."
+    );
+  }
 }
 
-// Attendance endpoint
+// Google Sheets authentication.
+const auth = new google.auth.GoogleAuth({
+  credentials: {
+    client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+    private_key: privateKey
+  },
+  scopes: [
+    "https://www.googleapis.com/auth/spreadsheets"
+  ]
+});
+
+const sheets = google.sheets({
+  version: "v4",
+  auth
+});
+
+const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID;
+
+// Philippine local timestamp.
+function getPhilippineTimestamp() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(new Date());
+
+  const values = Object.fromEntries(
+    parts.map(part => [part.type, part.value])
+  );
+
+  return `${values.year}-${values.month}-${values.day} ` +
+    `${values.hour}:${values.minute}:${values.second}`;
+}
+
+// Attendance endpoint.
 app.post("/api/attendance", async (req, res) => {
   try {
-    console.log("Attendance endpoint reached");
-    const lrn = String(req.body.lrn || "").trim();
+    const lrn = String(req.body?.lrn || "").trim();
 
-    // Basic LRN validation
     if (!/^\d{1,20}$/.test(lrn)) {
       return res.status(400).json({
         success: false,
@@ -114,7 +114,7 @@ app.post("/api/attendance", async (req, res) => {
       });
     }
 
-    // Get registered students from Google Sheets
+    // Find the registered student.
     const studentResponse = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range: "Students!A2:B"
@@ -122,7 +122,6 @@ app.post("/api/attendance", async (req, res) => {
 
     const students = studentResponse.data.values || [];
 
-    // Compare LRNs as strings to preserve leading zeros
     const student = students.find(row =>
       String(row[0] ?? "").trim() === lrn
     );
@@ -143,11 +142,9 @@ app.post("/api/attendance", async (req, res) => {
       });
     }
 
-    // Create a timestamp for this submission
     const timestamp = getPhilippineTimestamp();
 
-    // APPEND a new row every time.
-    // There is intentionally no duplicate-checking logic.
+    // Record attendance in Google Sheets.
     await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
       range: "Attendance!A:C",
@@ -166,8 +163,15 @@ app.post("/api/attendance", async (req, res) => {
     });
 
   } catch (error) {
-    // Keep private credentials and student data out of error logs.
-    console.error("Attendance operation failed:", error.message);
+    // Log useful error details without printing credentials.
+    console.error(
+      "Attendance operation failed:",
+      error.message,
+      "Code:",
+      error.code || "N/A",
+      "HTTP status:",
+      error.response?.status || "N/A"
+    );
 
     return res.status(500).json({
       success: false,
@@ -176,12 +180,12 @@ app.post("/api/attendance", async (req, res) => {
   }
 });
 
-// Health check for testing
+// Health check.
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok" });
 });
 
-// Check configuration before starting
+// Start the server only when configuration is valid.
 try {
   checkConfiguration();
 
