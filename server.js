@@ -12,6 +12,7 @@ app.disable("x-powered-by");
 app.use(express.json({ limit: "10kb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
+// Normalize the private key from Render environment variables.
 function normalizePrivateKey(value) {
   let key = String(value || "").trim();
 
@@ -30,16 +31,13 @@ const privateKey = normalizePrivateKey(
 );
 
 const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID;
-const FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID;
-const SERVICE_ACCOUNT_EMAIL =
-  process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
 
+// Verify environment variables.
 function checkConfiguration() {
   const required = [
     "GOOGLE_SHEET_ID",
     "GOOGLE_SERVICE_ACCOUNT_EMAIL",
-    "GOOGLE_PRIVATE_KEY",
-    "GOOGLE_DRIVE_FOLDER_ID"
+    "GOOGLE_PRIVATE_KEY"
   ];
 
   const missing = required.filter(
@@ -53,16 +51,16 @@ function checkConfiguration() {
   }
 }
 
+// Authenticate with Google Sheets.
 checkConfiguration();
 
 const auth = new google.auth.GoogleAuth({
   credentials: {
-    client_email: SERVICE_ACCOUNT_EMAIL,
+    client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
     private_key: privateKey
   },
   scopes: [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive"
+    "https://www.googleapis.com/auth/spreadsheets"
   ]
 });
 
@@ -71,14 +69,9 @@ const sheets = google.sheets({
   auth
 });
 
-const drive = google.drive({
-  version: "v3",
-  auth
-});
-
-// Get the current Philippine date and time.
-function getPhilippineDateTime() {
-  const parts = new Intl.DateTimeFormat("en-GB", {
+// Philippine date and time.
+function getPhilippineTimestamp() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Manila",
     year: "numeric",
     month: "2-digit",
@@ -93,109 +86,23 @@ function getPhilippineDateTime() {
     parts.map(part => [part.type, part.value])
   );
 
-  return {
-    date: `${values.year}-${values.month}-${values.day}`,
-    timestamp:
-      `${values.year}-${values.month}-${values.day} ` +
-      `${values.hour}:${values.minute}:${values.second}`
-  };
+  return (
+    `${values.year}-${values.month}-${values.day} ` +
+    `${values.hour}:${values.minute}:${values.second}`
+  );
 }
 
-// Find today's spreadsheet or create it inside the Drive folder.
-async function getDailyAttendanceSpreadsheet(date) {
-  const fileName = `Attendance - ${date}`;
-
-  // Look for an existing spreadsheet for today's date.
-  const search = await drive.files.list({
-    q:
-      `'${FOLDER_ID}' in parents and ` +
-      `name = '${fileName}' and ` +
-      `mimeType = 'application/vnd.google-apps.spreadsheet' and ` +
-      `trashed = false`,
-    pageSize: 100,
-    fields: "files(id,name)",
-    supportsAllDrives: true,
-    includeItemsFromAllDrives: true
-  });
-
-  const existingFiles = search.data.files || [];
-
-  if (existingFiles.length > 0) {
-    return existingFiles[0].id;
-  }
-
-  // Create the spreadsheet directly inside the folder.
-  const created = await drive.files.create({
-    requestBody: {
-      name: fileName,
-      mimeType: "application/vnd.google-apps.spreadsheet",
-      parents: [FOLDER_ID]
-    },
-    fields: "id,name,parents",
-    supportsAllDrives: true
-  });
-
-  const newSpreadsheetId = created.data.id;
-
-  // Get the default worksheet.
-  const spreadsheet = await sheets.spreadsheets.get({
-    spreadsheetId: newSpreadsheetId
-  });
-
-  const firstSheet = spreadsheet.data.sheets?.[0];
-
-  if (!firstSheet) {
-    throw new Error("The new spreadsheet has no worksheet.");
-  }
-
-  // Rename the worksheet to Attendance.
-  await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: newSpreadsheetId,
-    requestBody: {
-      requests: [
-        {
-          updateSheetProperties: {
-            properties: {
-              sheetId: firstSheet.properties.sheetId,
-              title: "Attendance"
-            },
-            fields: "title"
-          }
-        }
-      ]
-    }
-  });
-
-  // Add the column headings.
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: newSpreadsheetId,
-    range: "'Attendance'!A1:C1",
-    valueInputOption: "RAW",
-    requestBody: {
-      values: [[
-        "Timestamp",
-        "LRN",
-        "Student Name"
-      ]]
-    }
-  });
-
-  console.log(`Created daily spreadsheet: ${fileName}`);
-
-  return newSpreadsheetId;
-}
-
-// Health check.
+// Check that the server is running.
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok" });
 });
 
-// Verify the student and record attendance.
+// Record attendance after verifying the student's LRN.
 app.post("/api/attendance", async (req, res) => {
   try {
     const lrn = String(req.body?.lrn || "").trim();
 
-    // Validate the LRN.
+    // Reject empty or non-numeric LRNs.
     if (!/^\d{1,20}$/.test(lrn)) {
       return res.status(400).json({
         success: false,
@@ -203,7 +110,7 @@ app.post("/api/attendance", async (req, res) => {
       });
     }
 
-    // Read the permanent student list.
+    // Read the registered student list.
     const studentResponse =
       await sheets.spreadsheets.values.get({
         spreadsheetId: SPREADSHEET_ID,
@@ -217,6 +124,7 @@ app.post("/api/attendance", async (req, res) => {
       String(row[0] ?? "").trim() === lrn
     );
 
+    // Do not record unregistered students.
     if (!student) {
       return res.status(404).json({
         success: false,
@@ -234,16 +142,12 @@ app.post("/api/attendance", async (req, res) => {
       });
     }
 
-    // Get the Philippine date and timestamp.
-    const { date, timestamp } = getPhilippineDateTime();
+    // Generate the timestamp after verifying the student.
+    const timestamp = getPhilippineTimestamp();
 
-    // Find or create today's attendance spreadsheet.
-    const dailySpreadsheetId =
-      await getDailyAttendanceSpreadsheet(date);
-
-    // Record attendance in today's spreadsheet.
+    // Save attendance to the original spreadsheet.
     await sheets.spreadsheets.values.append({
-      spreadsheetId: dailySpreadsheetId,
+      spreadsheetId: SPREADSHEET_ID,
       range: "'Attendance'!A:C",
       valueInputOption: "RAW",
       insertDataOption: "INSERT_ROWS",
@@ -263,8 +167,7 @@ app.post("/api/attendance", async (req, res) => {
     console.error("Attendance operation failed:", {
       message: error.message,
       code: error.code || null,
-      status: error.response?.status || null,
-      details: error.response?.data?.error?.errors || null
+      status: error.response?.status || null
     });
 
     return res.status(500).json({
@@ -276,5 +179,7 @@ app.post("/api/attendance", async (req, res) => {
 });
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`QR Attendance server running on port ${PORT}`);
+  console.log(
+    `QR Attendance server running on port ${PORT}`
+  );
 });
